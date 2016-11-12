@@ -18,7 +18,13 @@ LIBRARY_PROXY = {
     'dl.acm.org': 'dl.acm.org.proxy.library.cmu.edu'
 }
 
+# taken from http://stackoverflow.com/questions/26494211/extracting-text-from-a-pdf-file-using-pdfminer-in-python
 def convert_pdf_to_txt(path):
+
+    # don't go ahead if the .txt file for path already exists
+    if os.path.exists(path.replace(".pdf", ".txt")):
+        return 0
+
     rsrcmgr = PDFResourceManager()
     retstr = StringIO()
     codec = 'utf-8'
@@ -35,8 +41,8 @@ def convert_pdf_to_txt(path):
         for page in PDFPage.get_pages(fp, pagenos, maxpages=maxpages, password=password,caching=caching, check_extractable=True):
             interpreter.process_page(page)
     except:
-        print("exception while reading .pdf file")
-        return ""
+        print("leonardo.py::convert_to_pdf() : [ERROR] exception while reading .pdf file : %s" % (sys.exc_info()[0]))
+        return -1
 
     # extract the text from the read pages
     text = retstr.getvalue()
@@ -49,7 +55,7 @@ def convert_pdf_to_txt(path):
     device.close()
     retstr.close()
 
-    return text
+    return 0
 
 # taken from http://stackoverflow.com/questions/1175208/elegant-python-function-to-convert-camelcase-to-snake-case
 def to_camelcase(title):
@@ -74,9 +80,16 @@ def extract_link(webpage):
     for link in soup.findAll('a'):
         print link.get('href')
 
+# some links cannot be directly followed unless they are stripped of unwanted 
+# prefixes, etc.
 def cleanup_url(url):
 
+    # some urls on Google Scholar come with an unwanted 
+    # http://scholar.google.com/ prefix
     url = url.replace("http://scholar.google.com/", "")
+    # some urls come with 'https' instead of 'http'. for now, the best way to 
+    # handle this is to replace them directly: 3 out of 4 times it works every 
+    # time...
     url = url.replace("https://", "http://")
 
     return url
@@ -88,17 +101,13 @@ def download_articles(articles, output_dir):
         # filename derived from title, in camelcase (don't care how long it is)
         title_camelcase = to_camelcase(article.attrs['title'][0]) + ".pdf"
         filename = os.path.join(output_dir, title_camelcase)
+        print("leonardo.py::download_articles() : [INFO] filename for .pdf file %s" % (filename))
 
-        # download the article, save it in output dir
-        # with urllib.request.urlopen(article.attrs['url'][0]) as response, open(filename, 'wb') as out_file:
-        #     shutil.copyfileobj(response, out_file)
-        print(article.attrs['url'][0])
+        # download the article, save it in output dir (if filename doesn't exist yet)
         url = cleanup_url(article.attrs['url'][0])
-
-        print(url)
-        print(filename)
-
-        # urllib.urlretrieve(url, filename)
+        print("leonardo.py::download_articles() : [INFO] dirty vs. clean url : %s -> %s" % (article.attrs['url'][0], url))
+        if not os.path.exists(filename):
+            urllib.urlretrieve(url, filename)
 
 def get_articles(options):
 
@@ -119,30 +128,30 @@ def get_articles(options):
 
     querier.apply_settings(settings)
 
-    if options.cluster_id:
-        query = ClusterScholarQuery(cluster=options.cluster_id)
-    else:
-        query = SearchScholarQuery()
-        if options.author:
-            query.set_author(options.author)
-        if options.allw:
-            query.set_words(options.allw)
-        if options.some:
-            query.set_words_some(options.some)
-        if options.none:
-            query.set_words_none(options.none)
-        if options.phrase:
-            query.set_phrase(options.phrase)
-        if options.title_only:
-            query.set_scope(True)
-        if options.pub:
-            query.set_pub(options.pub)
-        if options.after or options.before:
-            query.set_timeframe(options.after, options.before)
-        if options.no_patents:
-            query.set_include_patents(False)
-        if options.no_citations:
-            query.set_include_citations(False)
+    # if options.cluster_id:
+    #     query = ClusterScholarQuery(cluster=options.cluster_id)
+    # else:
+    query = SearchScholarQuery()
+    if options.author:
+        query.set_author(options.author)
+    if options.allw:
+        query.set_words(options.allw)
+    if options.some:
+        query.set_words_some(options.some)
+    if options.none:
+        query.set_words_none(options.none)
+    if options.phrase:
+        query.set_phrase(options.phrase)
+    if options.title_only:
+        query.set_scope(True)
+    if options.pub:
+        query.set_pub(options.pub)
+    if options.after or options.before:
+        query.set_timeframe(options.after, options.before)
+    if options.no_patents:
+        query.set_include_patents(False)
+    if options.no_citations:
+        query.set_include_citations(False)
 
     if options.count is not None:
         options.count = min(options.count, ScholarConf.MAX_PAGE_RESULTS)
@@ -205,16 +214,16 @@ Examples:
 
     group = optparse.OptionGroup(parser, 'Output format',
                                  'These options control the appearance of the results.')
-    # group.add_option('--txt', action='store_true',
-    #                  help='Print article data in text format (default)')
-    # group.add_option('--txt-globals', action='store_true',
-    #                  help='Like --txt, but first print global results too')
-    # group.add_option('--csv', action='store_true',
-    #                  help='Print article data in CSV form (separator is "|")')
-    # group.add_option('--csv-header', action='store_true',
-    #                  help='Like --csv, but print header with column names')
-    # group.add_option('--citation', metavar='FORMAT', default=None,
-    #                  help='Print article details in standard citation format. Argument Must be one of "bt" (BibTeX), "en" (EndNote), "rm" (RefMan), or "rw" (RefWorks).')
+    group.add_option('--txt', action='store_true',
+                     help='Print article data in text format (default)')
+    group.add_option('--txt-globals', action='store_true',
+                     help='Like --txt, but first print global results too')
+    group.add_option('--csv', action='store_true',
+                     help='Print article data in CSV form (separator is "|")')
+    group.add_option('--csv-header', action='store_true',
+                     help='Like --csv, but print header with column names')
+    group.add_option('--citation', metavar='FORMAT', default=None,
+                     help='Print article details in standard citation format. Argument Must be one of "bt" (BibTeX), "en" (EndNote), "rm" (RefMan), or "rw" (RefWorks).')
 
     # additional option (compared to scholar.py): self explanatory 
     group.add_option('--output-dir', metavar='OUTPUT_DIR', default=None,
