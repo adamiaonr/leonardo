@@ -4,8 +4,10 @@ import os
 import sys
 import optparse
 import urllib
-import shutil
+import requests
+import js2xml
 
+from tree import *
 from scholar import *
 from BeautifulSoup import BeautifulSoup
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
@@ -13,6 +15,8 @@ from pdfminer.converter import TextConverter
 from pdfminer.layout import LAParams
 from pdfminer.pdfpage import PDFPage
 from cStringIO import StringIO
+# for webpage parsing
+from lxml import html
 
 LIBRARY_PROXY = {
     'dl.acm.org': 'dl.acm.org.proxy.library.cmu.edu'
@@ -106,8 +110,68 @@ def download_articles(articles, output_dir):
         # download the article, save it in output dir (if filename doesn't exist yet)
         url = cleanup_url(article.attrs['url'][0])
         print("leonardo.py::download_articles() : [INFO] dirty vs. clean url : %s -> %s" % (article.attrs['url'][0], url))
-        if not os.path.exists(filename):
-            urllib.urlretrieve(url, filename)
+
+        if url.endswith(".pdf"):
+            if not os.path.exists(filename):
+                urllib.urlretrieve(url, filename)
+        else:
+
+            if "dl.acm.org" in url:
+                parse_acm_article(url)
+            else:
+                print("leonardo.py::download_articles() : [INFO] no parsing method for %s" % (url))
+
+
+# special parser for ACM articles. scrapes ACM article pages and extracts 
+# the tree of index terms according to the ACM Computing Classification System
+def parse_acm_article(webpage):
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:27.0) Gecko/20100101 Firefox/27.0'
+    }
+
+    page = requests.get(webpage, headers=headers)
+    tree = html.fromstring(page.content)
+
+    taxonomy_js = tree.xpath("//script[contains(., 'CCS&nbsp;for&nbsp;this&nbsp;Article')]/text()")[0]
+    # enter the javascript parser
+    parsed_js = js2xml.parse(taxonomy_js)
+    
+    # values represent the name of the taxonomy categories
+    tax_tree = Tree()
+    tax_tree.add_node("0")
+
+    raw_values = parsed_js.xpath("//property[@name='f']/string/text()")
+    for rv in raw_values:
+        # read the raw value into an html
+        html_value = html.fromstring(rv)
+        # extract the category and ids
+        cat_id = html_value.xpath("//a/@href")
+
+        if (len(cat_id) < 1):
+            continue
+
+        cat = html_value.xpath("//a/text()")[0]
+        cat_id = html_value.xpath("//a/@href")[0].split("?", 1)[1].split("&", 1)[0].lstrip("id=")
+        cat_ids = html_value.xpath("//a/@href")[0].split("?", 1)[1].split("&", 1)[1].lstrip("lid=")
+
+        # print cat
+        # print cat_id
+        # print cat_ids
+        print("leonardo.py::parse_acm_article() : [INFO] adding node(%s, %s) to taxonomy" % (cat_id, cat_ids.split(".")[-2]))
+
+        try:
+            tax_tree.add_node(cat_id, cat_ids.split(".")[-2], cat)
+        except:
+            print("leonardo.py::parse_acm_article() : [ERROR] key error with (%s, %s)" % (cat_id, cat_ids.split(".")[-2]))
+
+    print tax_tree.display("0")
+
+    # # print js2xml.pretty_print(parsed_js) 
+    # print("***** DEPTH-FIRST ITERATION *****")
+    # for node in tax_tree.traverse("0"):
+    #     print(node)
+        
 
 def get_articles(options):
 
